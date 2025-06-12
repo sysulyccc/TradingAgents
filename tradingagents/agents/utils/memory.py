@@ -1,19 +1,31 @@
 import chromadb
 from chromadb.config import Settings
 from openai import OpenAI
-import numpy as np
+import os
 
 
 class FinancialSituationMemory:
-    def __init__(self, name):
-        self.client = OpenAI()
+    def __init__(self, name, config):
+        if config["openai_backend"] == "http://localhost:11434/v1":
+            self.embedding = "nomic-embed-text"
+        else:
+            self.embedding = "text-embedding-ada-002"
+        
+        # Get appropriate API key based on backend
+        if config["openai_backend"] == "https://openrouter.ai/api/v1":
+            api_key = os.getenv("OPENROUTER_API_KEY")
+        else:
+            api_key = os.getenv("OPENAI_API_KEY")
+        
+        self.client = OpenAI(base_url=config["openai_backend"], api_key=api_key)
         self.chroma_client = chromadb.Client(Settings(allow_reset=True))
         self.situation_collection = self.chroma_client.create_collection(name=name)
 
     def get_embedding(self, text):
         """Get OpenAI embedding for a text"""
+        
         response = self.client.embeddings.create(
-            model="text-embedding-ada-002", input=text
+            model=self.embedding, input=text
         )
         return response.data[0].embedding
 

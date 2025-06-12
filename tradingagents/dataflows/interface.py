@@ -703,10 +703,16 @@ def get_YFin_data(
 
 
 def get_stock_news_openai(ticker, curr_date):
-    client = OpenAI()
+    config = get_config()
+    # Get appropriate API key based on backend
+    if config["openai_backend"] == "https://openrouter.ai/api/v1":
+        api_key = os.getenv("OPENROUTER_API_KEY")
+    else:
+        api_key = os.getenv("OPENAI_API_KEY")
+    client = OpenAI(base_url=config["openai_backend"], api_key=api_key)
 
     response = client.responses.create(
-        model="gpt-4.1-mini",
+        model=config["quick_think_llm"],
         input=[
             {
                 "role": "system",
@@ -737,10 +743,16 @@ def get_stock_news_openai(ticker, curr_date):
 
 
 def get_global_news_openai(curr_date):
-    client = OpenAI()
+    config = get_config()
+    # Get appropriate API key based on backend
+    if config["openai_backend"] == "https://openrouter.ai/api/v1":
+        api_key = os.getenv("OPENROUTER_API_KEY")
+    else:
+        api_key = os.getenv("OPENAI_API_KEY")
+    client = OpenAI(base_url=config["openai_backend"], api_key=api_key)
 
     response = client.responses.create(
-        model="gpt-4.1-mini",
+        model=config["quick_think_llm"],
         input=[
             {
                 "role": "system",
@@ -771,10 +783,16 @@ def get_global_news_openai(curr_date):
 
 
 def get_fundamentals_openai(ticker, curr_date):
-    client = OpenAI()
+    config = get_config()
+    # Get appropriate API key based on backend
+    if config["openai_backend"] == "https://openrouter.ai/api/v1":
+        api_key = os.getenv("OPENROUTER_API_KEY")
+    else:
+        api_key = os.getenv("OPENAI_API_KEY")
+    client = OpenAI(base_url=config["openai_backend"], api_key=api_key)
 
     response = client.responses.create(
-        model="gpt-4.1-mini",
+        model=config["quick_think_llm"],
         input=[
             {
                 "role": "system",
