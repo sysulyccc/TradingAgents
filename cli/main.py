@@ -1,6 +1,8 @@
 from typing import Optional
 import datetime
 import typer
+from pathlib import Path
+from functools import wraps
 from rich.console import Console
 from rich.panel import Panel
 from rich.spinner import Spinner
@@ -409,7 +411,7 @@ def get_user_selections():
     # Step 1: Ticker symbol
     console.print(
         create_question_box(
-            "Step 1: Ticker Symbol", "Enter the ticker symbol to analyze", "SPY"
+            "Step 1: Ticker Symbol", "Choose from popular stocks or enter custom ticker", "多种选择可用"
         )
     )
     selected_ticker = get_ticker()
@@ -473,8 +475,73 @@ def get_user_selections():
 
 
 def get_ticker():
-    """Get ticker symbol from user input."""
-    return typer.prompt("", default="SPY")
+    """Get ticker symbol from user input with popular stock suggestions."""
+    # 预定义的热门股票列表 (基于reddit_utils.py中的ticker_to_company字典)
+    POPULAR_TICKERS = [
+        ("SPY - SPDR S&P 500 ETF Trust (默认)", "SPY"),
+        ("AAPL - Apple Inc.", "AAPL"),
+        ("MSFT - Microsoft Corporation", "MSFT"),
+        ("NVDA - NVIDIA Corporation", "NVDA"),
+        ("GOOGL - Alphabet Inc. (Google)", "GOOGL"),
+        ("TSLA - Tesla, Inc.", "TSLA"),
+        ("AMZN - Amazon.com, Inc.", "AMZN"),
+        ("META - Meta Platforms, Inc. (Facebook)", "META"),
+        ("AMD - Advanced Micro Devices, Inc.", "AMD"),
+        ("NFLX - Netflix, Inc.", "NFLX"),
+        ("INTC - Intel Corporation", "INTC"),
+        ("CRM - Salesforce, Inc.", "CRM"),
+        ("ADBE - Adobe Inc.", "ADBE"),
+        ("自定义输入其他股票代码", "CUSTOM"),
+    ]
+    
+    # 显示选择列表
+    console.print("\n[bold cyan]📈 请选择要分析的股票:[/bold cyan]")
+    
+    # 创建选择项
+    choices = []
+    for display, value in POPULAR_TICKERS:
+        choices.append(f"{value:<6} - {display.split(' - ', 1)[1] if ' - ' in display else display}")
+    
+    # 显示选择菜单
+    for i, choice in enumerate(choices, 1):
+        if "SPY" in choice:
+            console.print(f"  [bold green]{i:2d}.[/bold green] [yellow]{choice}[/yellow]")
+        elif "自定义" in choice:
+            console.print(f"  [bold blue]{i:2d}.[/bold blue] [cyan]{choice}[/cyan]")
+        else:
+            console.print(f"  [dim]{i:2d}.[/dim] {choice}")
+    
+    console.print()
+    
+    while True:
+        try:
+            selection = typer.prompt("请输入选项编号 (1-14) 或直接输入股票代码", default="1")
+            
+            # 如果输入的是数字
+            if selection.isdigit():
+                choice_num = int(selection)
+                if 1 <= choice_num <= len(POPULAR_TICKERS):
+                    display, ticker = POPULAR_TICKERS[choice_num - 1]
+                    
+                    if ticker == "CUSTOM":
+                        # 自定义输入
+                        custom_ticker = typer.prompt("请输入股票代码")
+                        return custom_ticker.strip().upper()
+                    else:
+                        return ticker
+                else:
+                    console.print(f"[red]请输入 1-{len(POPULAR_TICKERS)} 之间的数字[/red]")
+                    continue
+            else:
+                # 直接输入股票代码
+                return selection.strip().upper()
+                
+        except KeyboardInterrupt:
+            console.print("\n[yellow]已取消选择，使用默认值 SPY[/yellow]")
+            return "SPY"
+        except Exception:
+            console.print("[red]输入无效，请重试[/red]")
+            continue
 
 
 def get_analysis_date():
@@ -704,11 +771,64 @@ def run_analysis():
     config["quick_think_llm"] = selections["shallow_thinker"]
     config["deep_think_llm"] = selections["deep_thinker"]
     config["openai_backend"] = selections["openai_backend"]
+    
+    # Disable online tools when using OpenRouter since they use OpenAI-specific APIs
+    if config["openai_backend"] == "https://openrouter.ai/api/v1":
+        config["online_tools"] = False
+        console.print("[yellow]注意: 使用 OpenRouter 时自动禁用在线工具，改用离线数据源[/yellow]")
 
     # Initialize the graph
     graph = TradingAgentsGraph(
         [analyst.value for analyst in selections["analysts"]], config=config, debug=True
     )
+
+    # Create result directory
+    results_dir = Path(config["results_dir"]) / selections["ticker"] / selections["analysis_date"]
+    results_dir.mkdir(parents=True, exist_ok=True)
+    report_dir = results_dir / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    log_file = results_dir / "message_tool.log"
+    log_file.touch(exist_ok=True)
+
+    def save_message_decorator(obj, func_name):
+        func = getattr(obj, func_name)
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            func(*args, **kwargs)
+            timestamp, message_type, content = obj.messages[-1]
+            content = content.replace("\n", " ")  # Replace newlines with spaces
+            with open(log_file, "a") as f:
+                f.write(f"{timestamp} [{message_type}] {content}\n")
+        return wrapper
+    
+    def save_tool_call_decorator(obj, func_name):
+        func = getattr(obj, func_name)
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            func(*args, **kwargs)
+            timestamp, tool_name, args = obj.tool_calls[-1]
+            args_str = ", ".join(f"{k}={v}" for k, v in args.items())
+            with open(log_file, "a") as f:
+                f.write(f"{timestamp} [Tool Call] {tool_name}({args_str})\n")
+        return wrapper
+
+    def save_report_section_decorator(obj, func_name):
+        func = getattr(obj, func_name)
+        @wraps(func)
+        def wrapper(section_name, content):
+            func(section_name, content)
+            if section_name in obj.report_sections and obj.report_sections[section_name] is not None:
+                content = obj.report_sections[section_name]
+                if content:
+                    file_name = f"{section_name}.md"
+                    with open(report_dir / file_name, "w") as f:
+                        f.write(content)
+        return wrapper
+
+    message_buffer.add_message = save_message_decorator(message_buffer, "add_message")
+    message_buffer.add_tool_call = save_tool_call_decorator(message_buffer, "add_tool_call")
+    message_buffer.update_report_section = save_report_section_decorator(message_buffer, "update_report_section")
+
 
     # Now start the display layout
     layout = create_layout()
